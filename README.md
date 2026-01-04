@@ -29,7 +29,7 @@
    - All data collected using **one uniform robotic embodiment** for consistency.
    - Fine-grained **subtask language annotations**.
    - Covers **residential**, **kitchen**, **retail**, and **office** settings.
-   - Dataset in **RLDS** format.
+   - Dataset in **RLDS/LeRobot** format.
 
 2. **Easy-to-Use Fine-Tuning Framework**
    - Fully compatible with the [LeRobot](https://github.com/huggingface/lerobot) dataset format and scalable to large, real-world datasets.
