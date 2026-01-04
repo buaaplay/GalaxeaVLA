@@ -1,16 +1,8 @@
-========================================================================
-Project Name: GalaxeFM
-License: Apache License, Version 2.0
-========================================================================
+G0 Plus — Notice
 
-This project is licensed under the Apache License, Version 2.0.
-See the LICENSE file in the project root for the full license text.
+G0 Plus is licensed under the G0 Plus Community License Agreement (Non-Commercial + Limited Patent License), not sold, Copyright © 2026 Galaxea. All rights reserved by Galaxea. ‘Galaxea’ and related marks are trademarks of Galaxea or its affiliates.
 
-========================================================================
-Third-Party Components
-========================================================================
-
-The following files or portions of code are derived from third-party projects
+This repository includes third-party components under their own licenses. You are responsible for complying with applicable third-party license terms.The following files or portions of code are derived from third-party projects
 and are included in this project under their original licenses:
 
 1. open-pi-zero (https://github.com/allenzren/open-pi-zero)

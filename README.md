@@ -49,6 +49,12 @@
    - **G0Plus_3B_base-pick_and_place**: A deployment-ready checkpoint, post-trained for robust pick-and-place performance in the wild.
    - **Out-of-the-Box Pick Up Anything Demo**: a Dockerfile and step-by-step guides for quick setup and reproducible experiments.
 
+
+<p align="center">
+  <img src="assets/Galaxea_G0_Plus.png" alt="G0Plus Overview" width="700"/>
+</p>
+
+
 ## 🚀 Galaxea Open-World Dataset
 
 ### **Key features**
@@ -98,7 +104,7 @@ Note that before you run the installation:
 | ---------------------- | ----------- | --------------------------------- | ------------------------------------------------------------ |
 | G0_3B_base              | Fine-Tuning | Base G0-VLA Model for fine-tuning | https://huggingface.co/OpenGalaxea/G0-VLA/blob/main/G0_3B_base.pt |
 | G0Plus_3B_base              | Fine-Tuning | Base G0Plus-VLA Model for fine-tuning | https://huggingface.co/OpenGalaxea/G0-VLA/tree/main/G0Plus_3B_base |
-| G0Plus_3B_base-pick_and_place | Deployment | Pick-and-Place Demo in the Wild | https://huggingface.co/OpenGalaxea/G0-VLA/tree/main/G0Plus_3B_base-pick_and_place |
+| G0Plus_3B_base-pick_and_place | Deployment | Pick-and-Place Demo in the Wild | https://huggingface.co/OpenGalaxea/G0-VLA/tree/main/G0Plus_PP_CKPT |
 
 ### 🔥 Fine-Tuning Base Models on Galaxea R1Lite Robot
 
@@ -132,11 +138,6 @@ To fine-tune our models with your own data, you should follow three steps:
    # example:
    bash scripts/run/finetune.sh 8 real/r1lite_g0plus_finetune_demo
    ```
-### 🔥🔥 Out-of-the-Box Pick Up Anything Demo
-
-We provide you with a [detailed user guide]((docs/pick_up_anything_user_guideline.md)) for setting up and running the Pick Up Anything Demo from scratch. 
-
-Feel free to raise an issue if you have any questions.
 
 #### FAQs of Fine-tuning
 
@@ -156,6 +157,11 @@ Feel free to raise an issue if you have any questions.
 
    A: Make sure you have enough GPU memory as mentioned above. Or, reduce the `batch_size` in [g0plus.yaml](configs/model/vla/g0plus.yaml) (default: `4`).
 
+### 🔥🔥 Out-of-the-Box Pick Up Anything Demo
+
+We provide you with a [detailed user guide](docs/pick_up_anything_user_guideline.md) for setting up and running the Pick Up Anything Demo from scratch. 
+
+Feel free to raise an issue if you have any questions.
 
 
 ## Acknowledgement
@@ -175,3 +181,20 @@ If you use our dataset or models, please cite:
   year={2025}
 }
 ```
+
+## License
+
+This repository contains materials released under different licenses depending on the release/tag:
+- **Legacy releases (Apache-2.0):** Versions released on August 11, 2025 are licensed under **Apache-2.0**.
+- **G0 Plus releases (Non-Commercial):** Versions released starting from January 4, 2026 are licensed under the **G0 Plus Community License Agreement (Non-Commercial + Limited Patent License)**. See [G0 Plus Community License Agreement](./LICENSE-G0-PLUS).
+
+### What you can do under the G0 Plus Community License
+
+You may use, reproduce, modify, and distribute the G0 Plus materials **only for non-commercial purposes**, such as academic research, personal use, education, and evaluation. Commercial use (including production deployment, providing services to third parties, or productization) requires a separate commercial license from us.
+
+### Notices and attribution
+
+If you redistribute any part of the G0 Plus materials, you must include:
+- a copy/link of G0 Plus Community License Agreement, and
+- the NOTICE file in this repository, and
+- prominent notices on modified files indicating changes.
