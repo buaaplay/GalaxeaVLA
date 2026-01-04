@@ -19,6 +19,11 @@
 ## 📢 News
 
 [Jan 4, 2026] We are releasing **G0Plus**, our latest pre-trained VLA model for multi-task robot manipulation.
+[Oct 7, 2025] Now Lerobot Format Galaxea Open-World Dataset is available at [Huggingface](https://huggingface.co/datasets/OpenGalaxea/Galaxea-Open-World-Dataset)!
+[Sep 17, 2025] Release G0-VLA fine-tuning and real-robot inference code.
+[Sep 9, 2025] Release G0-VLA pretrained model weights. [Huggingface](https://huggingface.co/OpenGalaxea/G0-VLA) and [Modelscope](https://www.modelscope.cn/models/Galaxea/G0-VLA)!
+[Sep 9, 2025] Release Galaxea Open-World Dataset. [Huggingface](https://huggingface.co/datasets/OpenGalaxea/Galaxea-Open-World-Dataset) and [Modelscope](https://www.modelscope.cn/datasets/Galaxea/Galaxea-Open-World-Dataset)!
+
 
 ## 📌 Overview
 
@@ -39,37 +44,6 @@
    - **G0Plus_3B_base**: A powerful pre-trained model with **2k hours+** real-world robot data for fine-tuning on custom tasks.
    - **G0Plus_3B_base-pick_and_place**: A deployment-ready checkpoint, post-trained for robust pick-and-place performance in the wild.
    - **Out-of-the-Box Pick Up Anything Demo**: a Dockerfile and step-by-step guides for quick setup and reproducible experiments.
-
-
-## ⏰ Roadmap / Release Timeline
-
-We are gradually open-sourcing the dataset and model. Progress will be updated here:
-
-- [x] **Aug 23, 2025**  
-  - Release **Galaxea Open-World Dataset**.
-  - Now our Open-Galaxea-Dataset is available at [Huggingface](https://huggingface.co/datasets/OpenGalaxea/Galaxea-Open-World-Dataset) and [Modelscope](https://www.modelscope.cn/datasets/Galaxea/Galaxea-Open-World-Dataset)!
-
-- [x] **Sep 9, 2025**  
-  - Release **G0-VLA pretrained model weights**.
-  - Now our pretained weight is available at [Huggingface](https://huggingface.co/OpenGalaxea/G0-VLA) and [Modelscope](https://www.modelscope.cn/models/Galaxea/G0-VLA)!
-
-- [x] **Sep 17, 2025**  
-  - Release **G0-VLA real-robot [inference code](docs/inference.md)**.
-
-- [x] **Sep 17, 2025**  
-  - Release **G0-VLA fine-tuning code**.
-
-- [x] **Oct 7, 2025**  
-  - Now Lerobot Format Galaxea Open-World Dataset is available at [Huggingface](https://huggingface.co/datasets/OpenGalaxea/Galaxea-Open-World-Dataset)!
-
-- [x] **Dec 29, 2025**  
-  - Enhaced the traning framework, fully supported [LeRobot](https://github.com/huggingface/lerobot) dataset format.
-  - Added **G0Plus_3B_base**, a pre-trained model with **2k hours+** of real-world robot data.
-  - Added **G0Plus_3B_base-pick_and_place**, our latest post-trained model for pick-and-place deployment in the wild.
-
-- [ ] **Early in 2026**  
-  - 🔮 More updates to come (extended datasets, improved models, additional tools).
-
 
 ## 🚀 Galaxea Open-World Dataset
 
@@ -121,7 +95,6 @@ Note that before you run the installation:
 | G0_3B_base              | Fine-Tuning | Base G0-VLA Model for fine-tuning | https://huggingface.co/OpenGalaxea/G0-VLA/blob/main/G0_3B_base.pt |
 | G0Plus_3B_base              | Fine-Tuning | Base G0Plus-VLA Model for fine-tuning | https://huggingface.co/OpenGalaxea/G0-VLA/tree/main/G0Plus_3B_base |
 | G0Plus_3B_base-pick_and_place | Deployment | Pick-and-Place Demo in the Wild | https://huggingface.co/OpenGalaxea/G0-VLA/tree/main/G0Plus_3B_base-pick_and_place |
-| More Models come soon! |             |                                   |                                                              |
 
 ### 🔥 Fine-Tuning Base Models on Galaxea R1Lite Robot
 
@@ -155,6 +128,11 @@ To fine-tune our models with your own data, you should follow three steps:
    # example:
    bash scripts/run/finetune.sh 8 real/r1lite_g0plus_finetune_demo
    ```
+### 🔥🔥 Out-of-the-Box Pick Up Anything Demo
+
+We provide you with a [detailed user guide]((docs/pick_up_anything_user_guideline.md)) for setting up and running the Pick Up Anything Demo from scratch. 
+
+Feel free to raise an issue if you have any questions.
 
 #### FAQs of Fine-tuning
 
@@ -173,22 +151,6 @@ To fine-tune our models with your own data, you should follow three steps:
 4. Q: Out of Memory (OOM) error? 
 
    A: Make sure you have enough GPU memory as mentioned above. Or, reduce the `batch_size` in [g0plus.yaml](configs/model/vla/g0plus.yaml) (default: `4`).
-
-### 🔥🔥 Out-of-the-Box Pick Up Anything Demo
-
-We provide you with a [detailed user guide]((docs/pick_up_anything_user_guideline.md)) for setting up and running the Pick Up Anything Demo from scratch. 
-
-Feel free to raise an issue if you have any questions.
-
-## Troubleshooting
-
-We will collect common issues and their solutions here. If you encounter an issue, please check here first. If you can't find a solution, please file an issue on the repo.
-
-|     Issue     |                          Resolution                          |
-| :-----------: | :----------------------------------------------------------: |
-| About dataset | Step in our dataset is 15 HZ, and image resolution in RLDS is 224 x 224. But the lerobot format dataset with full resolution (1280 x 720) will come soon. |
-|               |                                                              |
-|               |                                                              |
 
 
 
