@@ -38,6 +38,9 @@ dependencies = [
     "safetensors==0.6.1",
     "peft==0.18.0",
 
+    # model
+    "sentencepiece==0.2.1",
+
     # configuaration
     "draccus==0.10.0",
     "hydra-colorlog==1.2.0",
@@ -97,7 +100,9 @@ dependencies = [
     "pyyaml==6.0.3",
     "rootutils==1.0.7",
     "rich==13.9.4",
-    "swanlab==0.6.9",
+    "swanlab==0.7.6",
+    "swanlab[dashboard]==0.7.6",
+    "swanboard==0.1.9b1",
     "termcolor==2.4.0",
     "tqdm>=4.67.1",
     "toml==0.10.2",
@@ -127,6 +132,10 @@ dependencies = [
     "robosuite==1.4.0",
     "bddl==1.0.1",
     "future==0.18.2",
+    "gym==0.26.2",
+
+    # efmnode
+    "google-genai",
 ]
 
 [project.optional-dependencies]

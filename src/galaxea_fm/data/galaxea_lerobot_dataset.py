@@ -2,10 +2,13 @@ import torch
 import numpy as np
 from typing import List, Literal, Dict, Optional, Any, DefaultDict
 from tqdm import tqdm
+from accelerate.logging import get_logger
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from galaxea_fm.data.base_lerobot_dataset import BaseLerobotDataset
+
+logger = get_logger(__name__)
 
 
 class GalaxeaLerobotDataset(BaseLerobotDataset):
@@ -24,17 +27,22 @@ class GalaxeaLerobotDataset(BaseLerobotDataset):
         ee_start_moving_thresh: float = 0.0,
 
         # train vs val
-        val_set_proportion: float = 0.05, 
+        val_set_proportion: float = 0.05,
         is_training_set: bool = False,
+
+        # lerobot_dataset version
+        lerobot_ds_version: Optional[Literal["2.1", "3.0"]] = "2.1",
+        **kwargs
     ):
         super().__init__(
-            dataset_dirs=dataset_dirs, 
-            shape_meta=shape_meta, 
-            action_size=action_size, 
-            past_action_size=past_action_size, 
-            obs_size=obs_size, 
-            val_set_proportion=val_set_proportion, 
-            is_training_set=is_training_set
+            dataset_dirs=dataset_dirs,
+            shape_meta=shape_meta,
+            action_size=action_size,
+            past_action_size=past_action_size,
+            obs_size=obs_size,
+            val_set_proportion=val_set_proportion,
+            is_training_set=is_training_set,
+            lerobot_ds_version=lerobot_ds_version,
         )
 
         self.ee_start_moving_thresh = ee_start_moving_thresh
@@ -146,11 +154,8 @@ class GalaxeaLerobotDataset(BaseLerobotDataset):
     def __getitem__(self, idx):
         if idx >= len(self):
             raise IndexError(f"Index {idx} out of bounds.")
-
         original_idx = self.get_original_index(idx)
-        sample = super().__getitem__(original_idx)
-
-        return sample
+        return super().__getitem__(original_idx)
     
     def get_init_positions(self):
         self._set_return_images(False)
@@ -166,4 +171,3 @@ class GalaxeaLerobotDataset(BaseLerobotDataset):
             init_positions[key] = np.mean(val, axis=0)
         self._set_return_images(True)
         return init_positions
-

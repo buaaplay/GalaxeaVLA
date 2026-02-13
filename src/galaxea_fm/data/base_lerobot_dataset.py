@@ -28,6 +28,10 @@ class BaseLerobotDataset(torch.utils.data.Dataset):
         # train vs val
         val_set_proportion: float = 0.05, 
         is_training_set: bool = False,
+
+        # lerobot_ds_version
+        lerobot_ds_version: Optional[Literal["2.1", "3.0"]] = "2.1",
+        **kwargs,
     ):
         assert len(dataset_dirs) > 0, "At least one dataset directory is required"
         assert past_action_size == 0
@@ -40,6 +44,11 @@ class BaseLerobotDataset(torch.utils.data.Dataset):
         self.obs_size = obs_size
         self.processor = None  # Will be set externally
         metas = []
+        if lerobot_ds_version == "2.1":
+            from galaxea_fm.data.lerobot.lerobot_dataset import LeRobotDatasetMetadata, MultiLeRobotDataset
+        else:
+            from galaxea_fm.data.lerobot.lerobot_dataset_v3 import LeRobotDatasetMetadata, MultiLeRobotDataset
+        
         for ds_dir in dataset_dirs:
             ds_root = Path(ds_dir)
             repo_id = ds_dir
@@ -82,6 +91,9 @@ class BaseLerobotDataset(torch.utils.data.Dataset):
                 else:
                     episodes.update({meta.repo_id: list(range(split_idx, meta.total_episodes))})
 
+        # Note: Lerobot3.0 should just receive episodes=None, and do not filter any during load hf dataset.
+        if lerobot_ds_version == "3.0":
+            episodes = None
         self.multi_dataset = MultiLeRobotDataset(
             dataset_dirs=self.dataset_dirs,
             episodes=episodes,
@@ -126,7 +138,8 @@ class BaseLerobotDataset(torch.utils.data.Dataset):
         if image.ndim == 3: # time dim will lost when obs_size is 1
             image = image.unsqueeze(0)        
         image = (image * 255).to(torch.uint8) # (1, 3, H, W)
-        assert image.shape[1:] == raw_shape, f"Image '{key}' shape {image.shape[1:]} mismatch with {raw_shape}."
+        # NOTE: Image sizes changes very often, so disable it. 
+        # assert image.shape[1:] == raw_shape, f"Image '{key}' shape {image.shape[1:]} mismatch with {raw_shape}."
         return image
     
     def _get_episode_data(self, episode_idx):
@@ -152,8 +165,8 @@ class BaseLerobotDataset(torch.utils.data.Dataset):
         return sample
 
     def __getitem__(self, idx):
-        if idx >= len(self):
-            raise IndexError(f"Index {idx} out of bounds {len(self)}.")
+        if idx >= BaseLerobotDataset.__len__(self):
+            raise IndexError(f"Index {idx} out of bounds {BaseLerobotDataset.__len__(self)}.")
 
         # Retry with random indices until we successfully load a frame.
         sample_idx = idx
@@ -171,7 +184,7 @@ class BaseLerobotDataset(torch.utils.data.Dataset):
                     "Retrying with a random index. "
                     f"Error: {err}"
                 )
-                sample_idx = np.random.randint(len(self))
+                sample_idx = np.random.randint(BaseLerobotDataset.__len__(self))
         else:
             raise RuntimeError(
                 f"Failed to load a valid sample after {MAX_GETITEM_ATTEMPT} attempts "
@@ -210,8 +223,8 @@ class BaseLerobotDataset(torch.utils.data.Dataset):
         sample = self._get_additional_data(sample, lerobot_sample)
 
         # Preprocess the sample using the processor
-        assert self.processor is not None
-        sample = self.processor.preprocess(sample)
+        if self.processor is not None:
+            sample = self.processor.preprocess(sample)
 
         return sample
 

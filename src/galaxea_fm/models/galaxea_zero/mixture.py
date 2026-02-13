@@ -27,13 +27,10 @@ from typing import Optional, Tuple
 import torch
 import torch.nn as nn
 
-from .paligemma.modules import (
-    GemmaMLP,
-    GemmaRMSNorm,
-    GemmaRotaryEmbedding,
-)
 from .utils import apply_rotary_pos_emb, repeat_kv
 from .modules import AdaptiveLayerscale, AdaptiveRMSNorm
+from galaxea_fm.utils.import_utils import get_obj_from_str
+
 
 
 class Mixture(nn.Module):
@@ -44,7 +41,7 @@ class Mixture(nn.Module):
 
         self.adaptive_mode = None
         if config.use_final_norm:
-            self.norm = GemmaRMSNorm(
+            self.norm = get_obj_from_str(config.module_names.norm)(
                 config.hidden_size,
                 eps=config.rms_norm_eps,
             )
@@ -88,13 +85,13 @@ class MixtureDecoderLayer(nn.Module):
         super().__init__()
         self.self_attn = MixtureAttention(config)
 
-        self.mlp = GemmaMLP(config)
+        self.mlp = get_obj_from_str(config.module_names.mlp)(config)
 
-        self.input_layernorm = GemmaRMSNorm(
+        self.input_layernorm = get_obj_from_str(config.module_names.norm)(
             config.hidden_size,
             eps=config.rms_norm_eps,
         )
-        self.post_attention_layernorm = GemmaRMSNorm(
+        self.post_attention_layernorm = get_obj_from_str(config.module_names.norm)(
             config.hidden_size,
             eps=config.rms_norm_eps,
         )
@@ -140,7 +137,7 @@ class MixtureAttention(nn.Module):
             config.hidden_size,
             bias=config.attention_bias,
         )
-        self.rotary_emb = GemmaRotaryEmbedding(
+        self.rotary_emb = get_obj_from_str(config.module_names.rope)(
             self.head_dim,
             max_position_embeddings=config.max_position_embeddings,
             base=config.rope_theta,

@@ -1,6 +1,4 @@
 import torch
-from transformers import AutoImageProcessor
-from PIL import Image
 
 
 def rotate_half(x):
@@ -31,30 +29,3 @@ def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
         slen,
         head_dim,
     )
-
-
-class ImageProcessorToTransform:
-    def __init__(self, processor: AutoImageProcessor):
-        """
-        Initialize the wrapper with an ImageProcessor instance.
-
-        Args:
-            processor (AutoImageProcessor): The Hugging Face ImageProcessor instance
-        """
-        self.processor = processor
-
-    def __call__(self, img: Image, **kwargs: str) -> torch.Tensor:
-        """
-        Process the input image and return a PyTorch tensor.
-        
-        Args:
-            img (PIL.Image): The input image to process.
-        
-        Returns:
-            torch.Tensor: Processed image as a tensor ready for model input.
-        """
-        # Process the image using the ImageProcessor
-        inputs = self.processor(img, return_tensors="pt", **kwargs)
-        
-        # Return the 'pixel_values' which is the processed tensor
-        return inputs['pixel_values']

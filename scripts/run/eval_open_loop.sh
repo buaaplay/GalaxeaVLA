@@ -18,4 +18,8 @@ config="${config#configs/}" # delete prefix configs/
 config="${config#task/}" # delete prefix task/
 config="${config%.yaml}" # delete suffix .yaml
 
-python scripts/eval_open_loop.py task=$config ckpt_path=$ckpt_path $ARGS
+python scripts/eval_open_loop.py \
+    task=$config \
+    ckpt_path=$ckpt_path \
+    logger.mode=local \
+    $ARGS

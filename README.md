@@ -18,6 +18,8 @@
 
 ## 📢 News
 
+[Feb 12, 2026] Update **G0Plus** pre-trained weights trained on larger-scale teleoperation and web data. Release **G0Tiny** (250M, SmolVLM2 backbone) for R1 Pro Orin edge deployment. New out-of-the-box demos: **Fold Towels** and **Handover Gift** (on-device G0Tiny inference via TensorRT at up to 10 Hz). Add [openpi](https://github.com/Physical-Intelligence/openpi)-based **pi0/pi0fast** fine-tuning support.
+
 [Jan 4, 2026] We are releasing **G0Plus**, our latest pre-trained VLA model for multi-task robot manipulation.
 
 [Oct 7, 2025] Now Lerobot Format Galaxea Open-World Dataset is available at [Huggingface](https://huggingface.co/datasets/OpenGalaxea/Galaxea-Open-World-Dataset)!
@@ -44,11 +46,13 @@
    - Fully compatible with the [LeRobot](https://github.com/huggingface/lerobot) dataset format and scalable to large, real-world datasets.
    - Modular design enables easy extension and adaptation for new tasks and environments.
 
-3. **Model Checkpoints & An Out-of-the-Box Demo!**  
+3. **Model Checkpoints & An Out-of-the-Box Demo!**
    - **G0Plus_3B_base**: A powerful pre-trained model with **2k hours+** real-world robot data for fine-tuning on custom tasks.
+   - **G0Tiny_250M_base**: A lightweight pre-trained model with **1k hours** of R1 Pro VR teleoperation data, with only **250M** parameters for on-device deployment on the R1 Pro Orin platform.
    - **G0Plus_3B_base-pick_and_place**: A deployment-ready checkpoint, post-trained for robust pick-and-place performance in the wild.
    - **Out-of-the-Box Pick Up Anything Demo**: a Dockerfile and step-by-step guides for quick setup and reproducible experiments.
-
+   - **Out-of-the-Box Fold Towels Demo**: a Dockerfile and step-by-step guides for quick setup and reproducible experiments.
+   - **Out-of-the-Box Handover Gift Demo**: a step-by-step guide for on-device G0Tiny VLA inference on R1 Pro Orin.
 
 <p align="center">
   <img src="assets/Galaxea_G0_Plus.png" alt="G0Plus Overview" width="700"/>
@@ -104,6 +108,7 @@ Note that before you run the installation:
 | ---------------------- | ----------- | --------------------------------- | ------------------------------------------------------------ |
 | G0_3B_base              | Fine-Tuning | Base G0-VLA Model for fine-tuning | https://huggingface.co/OpenGalaxea/G0-VLA/blob/main/G0_3B_base.pt |
 | G0Plus_3B_base              | Fine-Tuning | Base G0Plus-VLA Model for fine-tuning | https://huggingface.co/OpenGalaxea/G0-VLA/tree/main/G0Plus_3B_base |
+| G0Tiny_250M_base            | Fine-Tuning | Lightweight G0Tiny-VLA Model (250M) for edge deployment on R1 Pro Orin | Coming soon |
 | G0Plus_3B_base-pick_and_place | Deployment | Pick-and-Place Demo in the Wild | https://huggingface.co/OpenGalaxea/G0-VLA/tree/main/G0Plus_PP_CKPT |
 
 
@@ -115,11 +120,11 @@ To run inference on a real Galaxea R1Lite robot using our pre-trained G0Plus mod
 
 2. Then, follow steps and refer more details in our accompanying repo [EFMNode](https://github.com/OpenGalaxea/EFMNode).
 
-### 🔥 Fine-Tuning Base Models on Galaxea R1Lite Robot
+### 🔥 Fine-Tuning Base Models on Galaxea Robots
 
 To fine-tune our models with your own data, you should follow three steps:
 
-1. Create your own task configs in `configs/tasks/real/`. You can adapt it from our [configs demo](configs/task/real/r1lite_g0plus_finetune_demo.yaml).
+1. Create your own task configs in `configs/tasks/real/`. You can adapt it from our configs demos: [G0Plus on R1Lite](configs/task/real/g0plus_r1lite_finetune.yaml) or [G0Tiny on R1Pro](configs/task/real/g0tiny_r1pro_finetune.yaml).
 
 2. Install the required packages
 
@@ -130,12 +135,14 @@ To fine-tune our models with your own data, you should follow three steps:
 3. Set your environment variables
     - `HF_DATASETS_CACHE`: An empty directory for HF-related caches.
     - `GALAXEA_FM_OUTPUT_DIR`: An empty directory for checkpoints and logs output.
+    - `GALAXEA_FM_DATASET_STATS_CACHE_DIR`: A directory for caching dataset normalization statistics.
     - `SWANLAB_API_KEY`: Your SwanLab API key.
     
     ```bash
     export HF_ENDPOINT=https://hf-mirror.com
     export HF_DATASETS_CACHE=<YOUR_HF_CACHE_PATH>
     export GALAXEA_FM_OUTPUT_DIR=<YOUR_OUTPUT_DIR>
+    export GALAXEA_FM_DATASET_STATS_CACHE_DIR=<YOUR_STATS_CACHE_DIR>
     export SWANLAB_API_KEY=<YOUR_SWANLAB_API_KEY>
     ```
 
@@ -144,8 +151,11 @@ To fine-tune our models with your own data, you should follow three steps:
    ```bash
    bash scripts/run/finetune.sh <num_of_gpu> <task_path>
  
-   # example:
-   bash scripts/run/finetune.sh 8 real/r1lite_g0plus_finetune_demo
+   # examples:
+   bash scripts/run/finetune.sh 8 real/g0plus_r1lite_finetune
+   bash scripts/run/finetune.sh 8 real/g0tiny_r1pro_finetune
+   bash scripts/run/finetune.sh 8 real/pi0_r1lite_finetune
+   bash scripts/run/finetune.sh 8 real/pi0fast_r1lite_finetune
    ```
 
 #### FAQs of Fine-tuning
@@ -160,18 +170,19 @@ To fine-tune our models with your own data, you should follow three steps:
 
 3. Q: Cannot find the pre-trained model? 
 
-   A: We use `google/paligemma-3b-pt-224` as the pre-trained model, you should modify it twice in [g0plus.yaml](configs/model/vla/g0plus.yaml) the same as your actual path (default: `/data/google/paligemma-3b-pt-224`).
+   A: We use `google/paligemma-3b-pt-224` and `HuggingFaceTB/SmolVLM2-500M-Video-Instruct` as the pre-trained models, you should modify them twice in [g0plus.yaml](configs/model/vla/g0plus.yaml) and [g0tiny](configs/model/vla/g0tiny.yaml) the same as your actual paths (default: `/To/Your/Path/google/paligemma-3b-pt-224` and `/To/Your/Path/HuggingFaceTB/SmolVLM2-500M-Video-Instruct`).
 
 4. Q: Out of Memory (OOM) error? 
 
    A: Make sure you have enough GPU memory as mentioned above. Or, reduce the `batch_size` in [g0plus.yaml](configs/model/vla/g0plus.yaml) (default: `4`).
 
-### 🔥🔥 Out-of-the-Box Pick Up Anything Demo
+### 🔥🔥 Out-of-the-Box Demos
 
-We provide you with a [detailed user guide](docs/pick_up_anything_user_guideline.md) for setting up and running the Pick Up Anything Demo from scratch. 
+1. [Pick Up Anything](docs/pick_up_anything_user_guideline.md)
+2. [Fold Towels](docs/fold_towels_user_guideline.md)
+3. [Handover Gift](docs/handover_gift_user_guideline.md)
 
 Feel free to raise an issue if you have any questions.
-
 
 ## Acknowledgement
 

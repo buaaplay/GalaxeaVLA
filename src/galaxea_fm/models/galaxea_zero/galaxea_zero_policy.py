@@ -115,9 +115,6 @@ class GalaxeaZeroPolicy(BasePolicy):
         batch: Dict[str, torch.Tensor], 
         inference_mode=False,
     ):
-        # for loss test
-        # return self.test_forward_loss(batch)
-        
         if inference_mode:
             was_training = self.training
             self.model.eval()
@@ -139,12 +136,6 @@ class GalaxeaZeroPolicy(BasePolicy):
                 action_pad_masks = batch["action_is_pad"], 
                 proprio = batch["proprio"],
             )
-
-        print_current_state()
-        print(f"loss: {loss}")
-        print("===" * 10)
-
-        return loss, loss_value_dict
 
     def forward_train(
         self,

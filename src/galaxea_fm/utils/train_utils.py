@@ -1,5 +1,11 @@
+import os
 import time
+import atexit
+import signal
+import sys
 import torch
+import torch.distributed as dist
+from torch import nn
 import logging
 
 from pathlib import Path
@@ -9,6 +15,158 @@ from accelerate import Accelerator
 
 logger = logging.getLogger(__name__)
 
+
+def register_graceful_exit(accelerator: Accelerator):
+    """
+    Register cleanup handlers to ensure accelerator.end_training() is called on exit.
+    This flushes experiment trackers (wandb/swanlab) metadata.json.
+
+    Handles: normal exit, Ctrl+C (SIGINT), SIGTERM (SLURM/K8s), uncaught exceptions.
+
+    Note: When using torchrun, the elastic agent intercepts signals first and forwards
+    them to workers. Trackers like SwanLab may finish before our atexit runs, so we
+    wrap end_training() with exception handling to avoid errors on double-finish.
+    """
+    def _safe_end_training():
+        try:
+            accelerator.end_training()
+        except Exception:
+            pass  # Tracker already finished (e.g., SwanLab caught SIGINT first)
+
+    atexit.register(_safe_end_training)
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+
+
+def get_mlp_task_id():
+    """
+    Get the MLP task ID like `t-20260202105509-djbbd`
+    """
+    task_name = os.uname().nodename.split('-worker')[0]
+    return task_name
+
+
+def get_distributed_topology() -> dict:
+    """
+    Get distributed training topology information.
+    Compatible with single-GPU, single-node multi-GPU, and multi-node multi-GPU setups.
+
+    Supports environment variables from:
+    - MLP cluster (MLP_WORKER_NUM, MLP_WORKER_GPU)
+    - SLURM (SLURM_NNODES)
+    - torchrun (WORLD_SIZE, LOCAL_WORLD_SIZE)
+
+    Returns:
+        Dictionary containing:
+        - num_nodes: Number of machines
+        - gpus_per_node: GPUs per machine
+        - world_size: Total number of processes
+    """
+    # Get world size from distributed context or env
+    if dist.is_initialized():
+        world_size = dist.get_world_size()
+    else:
+        world_size = int(os.environ.get("WORLD_SIZE", 1))
+
+    # Get num_nodes: MLP_WORKER_NUM > SLURM_NNODES > NNODES > 1
+    num_nodes = int(os.environ.get(
+        "MLP_WORKER_NUM",
+        os.environ.get("SLURM_NNODES", os.environ.get("NNODES", 1))
+    ))
+
+    # Get gpus_per_node: MLP_WORKER_GPU > LOCAL_WORLD_SIZE > world_size / num_nodes
+    gpus_per_node_env = os.environ.get(
+        "MLP_WORKER_GPU",
+        os.environ.get("LOCAL_WORLD_SIZE")
+    )
+    if gpus_per_node_env is not None:
+        gpus_per_node = int(gpus_per_node_env)
+    else:
+        gpus_per_node = world_size // num_nodes if num_nodes > 0 else world_size
+
+    return {
+        "num_nodes": num_nodes,
+        "gpus_per_node": gpus_per_node,
+        "world_size": world_size,
+    }
+
+_GLOBAL_MONITOR = None
+class GlobalMonitor:
+    """
+    Hack for inner model layers to pass some monitoring info to the trainer.
+    """
+    def __init__(self):
+        self.log_dict = {}
+    def reset(self):
+        self.log_dict = {}
+    
+    def log(self, update_dict):
+        self.log_dict.update(update_dict)
+    
+    def get_metrics(self):
+        return self.log_dict
+
+def set_global_monitor():
+    global _GLOBAL_MONITOR
+    _GLOBAL_MONITOR = GlobalMonitor()
+
+def get_global_monitor() -> GlobalMonitor:
+    return _GLOBAL_MONITOR
+
+def _log_attention_stats(attn_weights: torch.Tensor, layer_idx: int, mixtures: nn.ModuleList, active_names: list):
+    """
+    Helper function to log attention statistics. 
+    Keeps the main forward pass clean.
+    """
+    # 1. Check if this is the target layer (Total - 2)
+    # Using the last active mixture to determine the architecture depth
+    total_layers = len(mixtures[active_names[-1]].layers)
+    if layer_idx != total_layers - 2:
+        return
+    # 2. Check if monitor is available
+    monitor = get_global_monitor()
+    if monitor is None:
+        return
+
+    # 3. Log the statistics
+    # Use .detach() to ensure no gradient tracking for logging
+    monitor.log({
+        f"monitor/softmax_maxlogits_layer_{layer_idx}": attn_weights.max().detach(),
+    })
+
+def _log_hidden_states_stats(
+    hidden_states_dict: dict[str, torch.FloatTensor], 
+    layer_idx: int, 
+    mixtures: nn.ModuleList
+):
+    """
+    Private hook to log statistics (absmax, absmean, std) of hidden states.
+    Triggered only at the penultimate layer (Total - 2).
+    """
+    active_names = list(hidden_states_dict.keys())
+    if not active_names:
+        return
+
+    # 1. Condition check: only log for the penultimate layer
+    total_layers = len(mixtures[active_names[-1]].layers)
+    if layer_idx != total_layers - 2:
+        return
+    # 2. Monitor availability check
+    monitor = get_global_monitor()
+    if monitor is None:
+        return
+
+    # 3. Batch logging of stats for each active mixture
+    stats_to_log = {}
+    for name in active_names:
+        # Move to CPU/Float and detach to avoid graph overhead
+        x = hidden_states_dict[name].detach()
+        stats_to_log.update({
+            f"monitor/{name}/x_out_absmax_layer_{layer_idx}": x.abs().max(),
+            f"monitor/{name}/x_out_absmean_layer_{layer_idx}": x.abs().mean(),
+            f"monitor/{name}/x_out_std_layer_{layer_idx}": x.std(),
+        })
+    
+    monitor.log(stats_to_log)
 
 def init_experiment_tracker(cfg: DictConfig, accelerator: Accelerator, output_dir: Path):
     """
@@ -58,13 +216,35 @@ def init_experiment_tracker(cfg: DictConfig, accelerator: Accelerator, output_di
     else:
         raise ValueError(f"Unsupported logger type: {tracker_type}. Choose 'swanlab', 'wandb', or 'none'.")
     
+    # Build config with distributed topology
+    config = OmegaConf.to_container(cfg, resolve=True)
+    topology = get_distributed_topology()
+
+    # Calculate effective batch size
+    batch_size = cfg.model.batch_size
+    grad_accumulation_steps = cfg.model.grad_accumulation_steps
+    effective_batch_size = batch_size * grad_accumulation_steps * topology["world_size"]
+    task_id = get_mlp_task_id()
+
+    # Add distributed topology to config
+    config["distributed"] = {
+        **topology,
+        "effective_batch_size": effective_batch_size,
+        "MLP_task_id": task_id,
+    }
+
     accelerator.init_trackers(
         project_name=project_name,
-        config=OmegaConf.to_container(cfg, resolve=True),
+        config=config,
         init_kwargs=init_kwargs,
     )
-    logger.info(f"Initialized {tracker_type} tracker")
-    
+    logger.info(f"MLP task ID: {task_id}")
+    logger.info(
+        f"Initialized {tracker_type} tracker | "
+        f"Topology: {topology['num_nodes']} nodes × {topology['gpus_per_node']} GPUs = {topology['world_size']} processes | "
+        f"Effective batch size: {effective_batch_size}"
+    )
+
     return tracker_type
 
 

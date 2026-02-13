@@ -1,19 +1,12 @@
-import copy
-import math
 import os
-import json
-import shutil
-import signal
 import logging
+from datetime import timedelta
 
 from contextlib import nullcontext
 from pathlib import Path
-from typing import Optional
-
 import hydra
 import torch
 import torch.distributed as dist
-import tqdm
 
 # TODO: fix bnb version
 try:
@@ -24,6 +17,7 @@ except ImportError:
 from accelerate import Accelerator, InitProcessGroupKwargs
 from accelerate.logging import get_logger
 from accelerate.utils import ProjectConfiguration
+
 from ema_pytorch import EMA
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
@@ -36,190 +30,83 @@ from transformers.utils.versions import require_version
 from galaxea_fm.data.base_lerobot_dataset import BaseLerobotDataset
 from galaxea_fm.processors.base_processor import BaseProcessor
 from galaxea_fm.models.base_policy import BasePolicy
-from galaxea_fm.models.fdp.unet_policy import DiffusionUnetImagePolicy
+from galaxea_fm.models.galaxea_zero.galaxea_zero_policy import GalaxeaZeroPolicy
 from galaxea_fm.utils.get_scheduler import get_scheduler
-from galaxea_fm.utils.logging_config import setup_logging
-from galaxea_fm.utils.pytorch_utils import dict_apply, set_global_seed
-from galaxea_fm.utils.train_utils import MFUTracker, init_experiment_tracker
-from galaxea_fm.utils.edp import edp_uploader
-from galaxea_fm.utils.edp.train_utils import override_cfg_with_edp, EDP_STORE_DATASET_ROOT
-from galaxea_fm.utils.onnx_exporter import ONNXExporter
-from galaxea_fm.utils.normalizer import load_dataset_stats_from_json, save_dataset_stats_to_json
+from galaxea_fm.utils.logging_config import (
+    setup_logging,
+    log_allocated_gpu_memory,
+    log_amp_config,
+)
+from galaxea_fm.utils.pytorch_utils import set_global_seed
+from galaxea_fm.utils.dist import ResumableDistributedSampler
+from galaxea_fm.utils.train_utils import MFUTracker, init_experiment_tracker, register_graceful_exit
+from galaxea_fm.utils.normalizer import (
+    load_dataset_stats_from_json, 
+    save_dataset_stats_to_json, 
+    search_dataset_stats_cache_json, 
+)
 from galaxea_fm.utils.config_resolvers import register_default_resolvers
+from galaxea_fm.utils.train_utils import set_global_monitor, get_global_monitor
+from galaxea_fm.utils.tqdm import tqdm
+from galaxea_fm.utils.git_info import save_git_info, GitInfoError
 
 register_default_resolvers()
-
-# Initialize Accelerator Logger
 logger = get_logger(__name__)
-
 require_version("datasets==3.6.0", "To fix: uv pip install datasets==3.6.0")
-
-# Sane Defaults
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
-
-def log_allocated_gpu_memory(log=None, stage="loading model", device=0):
-    if torch.cuda.is_available():
-        allocated_memory = torch.cuda.memory_allocated(device)
-        msg = f"Allocated GPU memory after {stage}: {allocated_memory/1024/1024/1024:.2f} GB"
-        logger.info(msg)
-
-
-def handle_resize(signum, frame):
-    for instance in list(tqdm.tqdm._instances):
-        if hasattr(instance, 'refresh'):
-            # 
-            instance.refresh()
-
-signal.signal(signal.SIGWINCH, handle_resize)
-
-
-def save_checkpoint(
-    path: Path,
-    step: int,
-    epoch: int,
-    batch_idx: int,
-    model: DDP,
-    optimizer: torch.optim.Optimizer,
-    scheduler: Optional[torch.optim.lr_scheduler._LRScheduler],
-    ema_model: EMA,
-):
-    assert path.suffix == ".pt"
-    path.parent.mkdir(exist_ok = True)
-    state = {
-        "step": step, 
-        "epoch": epoch, 
-        "batch_idx": batch_idx, 
-        "model_state_dict": model.state_dict(), 
-        "optimizer_state_dict": optimizer.state_dict(),
-        "scheduler_state_dict": scheduler.state_dict(),
-        "ema_model_state_dict": ema_model.ema_model.state_dict() if ema_model is not None else None,
-    }
-    torch.save(state, path)
-
-
-def load_state_dict_safely(model, state_dict, extra_prefixes=None):
-    """
-    Safely load state dict with support for extra keys like normalizer parameters.
-    
-    Args:
-        model: The model to load weights into
-        state_dict: State dict from checkpoint
-        extra_prefixes: List of key prefixes to force load even if not in model.state_dict()
-                       Default: ['normalizer.']
-    """
-    if extra_prefixes is None:
-        extra_prefixes = ['normalizer.']
-    
-    model_dict = model.state_dict()
-
-    mismatched_keys = []
-    missing_keys = []
-    unexpected_keys = []
-    extra_loaded_keys = []
-
-    # First pass: load keys that exist in model_dict
-    for key, param in model_dict.items():
-        if key in state_dict:
-            ckpt_param = state_dict[key]
-            if param.shape == ckpt_param.shape:
-                model_dict[key] = ckpt_param
-            else:
-                mismatched_keys.append((key, param.shape, ckpt_param.shape))
-                logger.warning(f"Shape mismatch for {key}: model={param.shape}, checkpoint={ckpt_param.shape} - keeping random initialization")
-        else:
-            missing_keys.append(key)
-            logger.warning(f"Missing key in checkpoint: {key} - keeping random initialization")
-
-    # Second pass: handle extra keys (like normalizer parameters)
-    for key in state_dict.keys():
-        if key not in model_dict:
-            # Check if this key should be force-loaded based on prefix
-            should_load = any(key.startswith(prefix) for prefix in extra_prefixes)
-            
-            if should_load:
-                model_dict[key] = state_dict[key]
-                extra_loaded_keys.append(key)
-                logger.info(f"Loading extra key: {key}")
-            else:
-                unexpected_keys.append(key)
-
-    model.load_state_dict(model_dict, strict=False)
-
-    # Log summary
-    if missing_keys:
-        logger.warning(f"Missing keys (keeping random init): {len(missing_keys)} parameters")
-    if unexpected_keys:
-        logger.warning(f"Unexpected keys in checkpoint: {len(unexpected_keys)} parameters")
-    if mismatched_keys:
-        logger.info(f"Shape mismatched keys (keeping random init): {len(mismatched_keys)} parameters")
-    if extra_loaded_keys:
-        logger.info(f"Extra keys loaded (e.g., normalizer): {len(extra_loaded_keys)} parameters")
-
-    total_params = len(model_dict)
-    loaded_params = total_params - len(missing_keys) - len(mismatched_keys)
-    logger.info(f"Successfully loaded {loaded_params}/{total_params} parameters from checkpoint")
-
-    return model
 
 
 @hydra.main(version_base="1.3", config_path="../configs", config_name="train.yaml")
 def finetune(cfg: DictConfig):
-    # [Validate] Ensure GPU Available & Set Device / Distributed Context
+    OmegaConf.resolve(cfg)
+    output_dir = Path(cfg.output_dir)
+
     assert torch.cuda.is_available(), "Fine-tuning assumes at least one GPU is available!"
-    amp_dtype = torch.bfloat16 if cfg.model.enable_bf16_training else torch.float32
-    mixed_precision = "bf16" if cfg.model.enable_bf16_training else "no"
-    
-    # Initialize Accelerator with mixed precision support
     project_config = ProjectConfiguration(project_dir=str(Path(cfg.output_dir)))
-    # Initialize distributed context
-    from datetime import timedelta
     init_process_group_kwargs = InitProcessGroupKwargs(timeout=timedelta(hours=2))
     accelerator = Accelerator(
-        mixed_precision=mixed_precision,
+        mixed_precision="bf16" if cfg.model.enable_bf16_training else "no",
         project_config=project_config,
         kwargs_handlers=[init_process_group_kwargs],
         log_with=cfg.logger.type,
     )
+    register_graceful_exit(accelerator)
     torch.cuda.set_device(device_id := accelerator.local_process_index)
     torch.cuda.empty_cache()
-    
-    # Log AMP configuration for verification
-    if accelerator.is_main_process:
-        logger.info("=" * 60)
-        logger.info("AMP Configuration:")
-        logger.info(f"  enable_bf16_training: {cfg.model.enable_bf16_training}")
-        logger.info(f"  model_weights_to_bf16: {cfg.model.model_weights_to_bf16}")
-        logger.info(f"  mixed_precision: {accelerator.mixed_precision}")
-        logger.info(f"  amp_dtype: {amp_dtype}")
-        logger.info(f"  native_amp: {accelerator.native_amp}")
-        logger.info("=" * 60)
 
-    OmegaConf.resolve(cfg)
-    output_dir = Path(cfg.output_dir)
-
-    is_use_edp = False
-    if accelerator.is_main_process:
-        is_use_edp = override_cfg_with_edp(cfg, output_dir)
-
-    # Configure unified logging system (applies to all modules in the codebase)
-    # Hydra's FileHandler (configured in hydra.yaml) will be preserved automatically
-    setup_logging(
-        log_level=logging.INFO,
-        is_main_process=accelerator.is_main_process,
-    )
-
-    cfg_json = OmegaConf.to_container(cfg, resolve=True)
-    cfg_json = json.dumps(cfg_json, indent=2)
+    # Pass is_main_process=True for setup_logging to enable distributed debugging using accelerate's logger
+    setup_logging(log_level=logging.INFO, is_main_process=accelerator.is_main_process)
     logger.info(f"Output directory: {output_dir}")
+    log_amp_config(logger, accelerator)
+    init_experiment_tracker(cfg, accelerator, output_dir)
+    set_global_monitor()
+    worker_init_fn = set_global_seed(cfg.seed, get_worker_init_fn=True)  # Set seed BEFORE model creation for reproducibility
+
+    # HACK: Select checkpoint functions based on format config. Legacy will be deprecated
+    if cfg.get("load_legacy_checkpoint", True):
+        from galaxea_fm.utils.load_pretrained_resumed import save_checkpoint
+        from galaxea_fm.utils.load_pretrained_resumed_legacy import (
+            load_pretrained_model,
+            load_embedded_dataset_stats, 
+            resume_checkpoint, 
+        )
+    else:
+        from galaxea_fm.utils.load_pretrained_resumed import (
+            load_pretrained_model,
+            load_embedded_dataset_stats, 
+            save_checkpoint, 
+            resume_checkpoint, 
+        )
+
+    # Save git information at training start
+    if accelerator.is_main_process:
+        try:
+            git_info_path = save_git_info(output_dir=output_dir)
+            logger.info(f"Git info saved to: {git_info_path}")
+        except GitInfoError as e:
+            logger.warning(f"Could not save git info: {e}")
 
     model: BasePolicy = instantiate(cfg.model.model_arch)
-    # assert not cfg.resume_ckpt and cfg.pretrained_ckpt
-    if cfg.resume_ckpt or cfg.model.pretrained_ckpt:
-        checkpoint = cfg.resume_ckpt if cfg.resume_ckpt else cfg.model.pretrained_ckpt
-        logger.info(f"Loading checkpoint from {checkpoint}")
-        state_dict = torch.load(checkpoint, weights_only=True, map_location='cpu')
-        model = load_state_dict_safely(model, state_dict["model_state_dict"], extra_prefixes=["normalizer."])
 
     if cfg.model.model_weights_to_bf16:
         model = model.to(torch.bfloat16)
@@ -239,46 +126,24 @@ def finetune(cfg: DictConfig):
     if cfg.model.use_torch_compile:  # model being compiled in the first batch which takes some time
         # torch._dynamo.config.suppress_errors = True
         model = torch.compile(model, mode="default")
-    
+
     model = model.to(device_id)
 
-    if accelerator.is_main_process:
-        log_allocated_gpu_memory(stage="loading model", device=0)
-        
-    # Initialize experiment tracker
-    tracker_type = init_experiment_tracker(cfg, accelerator, output_dir)
+    log_allocated_gpu_memory(logger, stage="loading model", device=0)
 
-    train_dataset: BaseLerobotDataset = instantiate(cfg.data, is_training_set=True)
-    eval_dataset: BaseLerobotDataset = instantiate(cfg.data, is_training_set=False)
-    train_processor: BaseProcessor = instantiate(cfg.model.processor)
-    eval_processor: BaseProcessor = instantiate(cfg.model.processor)
-    if not (cfg.resume_ckpt or (cfg.model.pretrained_ckpt and cfg.model.use_pretrained_norm_stats)):
-        logger.info("Calculating norm stats in the main process.")
-        if accelerator.is_main_process:
-            dataset_stats = train_dataset.get_dataset_stats(train_processor)
-            save_dataset_stats_to_json(dataset_stats, output_dir / "dataset_stats.json")
-        else:
-            dataset_stats = None
-
-        container = [dataset_stats]
-        dist.broadcast_object_list(container, src=0)
-        dataset_stats = container[0]
-    else:
-        checkpoint_path = Path(cfg.resume_ckpt if cfg.resume_ckpt else cfg.model.pretrained_ckpt)
-        dataset_stats = load_dataset_stats_from_json(checkpoint_path.parent.parent / "dataset_stats.json")
-        save_dataset_stats_to_json(dataset_stats, output_dir / "dataset_stats.json")
-
-    train_processor.set_normalizer_from_stats(dataset_stats)
-    eval_processor.set_normalizer_from_stats(dataset_stats)
+    train_dataset: BaseLerobotDataset = instantiate(cfg.data.dataset, is_training_set=True)
+    eval_dataset: BaseLerobotDataset = instantiate(cfg.data.dataset, is_training_set=False)
+    train_processor: BaseProcessor = instantiate(cfg.data.processor)
+    eval_processor: BaseProcessor = instantiate(cfg.data.processor)
     train_dataset.set_processor(train_processor)
     eval_dataset.set_processor(eval_processor)
-    
-    worker_init_fn = set_global_seed(cfg.seed, get_worker_init_fn=True)
-    train_sampler = DistributedSampler(
+
+    train_sampler = ResumableDistributedSampler(
         train_dataset,
         num_replicas=accelerator.num_processes,
         rank=accelerator.process_index,
         shuffle=True,
+        batch_size=cfg.model.batch_size,
     )
     eval_sampler = DistributedSampler(
         eval_dataset,
@@ -315,7 +180,7 @@ def finetune(cfg: DictConfig):
         max_steps = cfg.model.max_steps
     
     # Determine whether MFU tracking is supported before wrapping with DDP
-    skip_mfu_tracker = isinstance(model, DiffusionUnetImagePolicy)
+    use_mfu_tracker = isinstance(model, GalaxeaZeroPolicy)
 
     # Wrap model in PyTorch DDP Wrapper for Multi-GPU Training
     model = DDP(model, device_ids=[device_id], find_unused_parameters=cfg.model.find_unused_parameters, gradient_as_bucket_view=True)
@@ -331,7 +196,6 @@ def finetune(cfg: DictConfig):
         optimizer = AdamW(param_groups, betas=betas)
     
     if cfg.model.lr_scheduler_type == "OneCycleLR":
-        # from galaxea_dp lr scheduler
         from torch.optim.lr_scheduler import OneCycleLR
         scheduler = OneCycleLR(
             optimizer=optimizer,
@@ -350,62 +214,91 @@ def finetune(cfg: DictConfig):
             num_training_steps=max_steps,
         )
 
-    # Resume Training
+    # Resume training state
     if cfg.resume_ckpt:
         resume_dataloader = True
-        checkpoint = torch.load(cfg.resume_ckpt, weights_only=True, map_location=lambda storage, loc: storage.cuda(device_id))
-        step = checkpoint["step"]
-        epoch = checkpoint["epoch"]
-        batch_idx = checkpoint["batch_idx"]
-        model.module.load_state_dict(checkpoint["model_state_dict"])
-        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
-        if use_ema:
-            try:
-                ema_model.ema_model.load_state_dict(checkpoint['ema_model_state_dict'])
-            except KeyError:
-                logger.warning("EMA model not found in checkpoint, skipping EMA update")
-        del checkpoint  # Clean up checkpoint to avoid OOM
-        torch.cuda.empty_cache()
-        logger.info(f"Resuming training from step {step}")
+        step, epoch, batch_idx = resume_checkpoint(
+            checkpoint_path=cfg.resume_ckpt,
+            model=model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            ema_model=ema_model if use_ema else None,
+            device_id=device_id,
+        )
+        dataset_stats = load_embedded_dataset_stats(cfg.resume_ckpt)
+        logger.info(f"Resume training from step {step}, epoch {epoch}, batch_idx {batch_idx}")
     else:
         resume_dataloader = False
-        step = 0
-        epoch = 0
-        batch_idx = 0
-    
+        step, epoch, batch_idx = 0, 0, 0
+
+        if cfg.model.pretrained_ckpt:
+            logger.info(f"Loading pretrained checkpoint from {cfg.model.pretrained_ckpt}")
+            load_pretrained_model(cfg.model.pretrained_ckpt, model)
+            if use_ema:                                                                                                                                                                                                                             
+                ema_model.ema_model.load_state_dict(model.module.state_dict())                                                                                                                                                                      
+                logger.info("Synced EMA model to pretrained weights") 
+        else:
+            logger.info(f"Train model from initialization")
+
+        if cfg.model.pretrained_ckpt and cfg.model.use_pretrained_norm_stats:
+            logger.info(f"Use pretrained dataset stats from {cfg.model.pretrained_ckpt}")
+            dataset_stats = load_embedded_dataset_stats(cfg.model.pretrained_ckpt)
+        else:
+            logger.info("Calculate stats from dataset instead of loading from pretrained")
+            if accelerator.is_main_process:
+                exist_cache, cache_path = search_dataset_stats_cache_json(cfg.dataset_stats_cache_dir, cfg.data)
+                if exist_cache:
+                    logger.info(f"  Use dataset stats cache file {cache_path}")
+                    dataset_stats = load_dataset_stats_from_json(cache_path)
+                else:
+                    logger.info("  No cached stats found, computing from dataset ...")
+                    dataset_stats = train_dataset.get_dataset_stats(train_processor)
+                    save_dataset_stats_to_json(dataset_stats, cache_path)
+                    logger.info(f"  Saved dataset stats cache: {cache_path}")
+            else:
+                dataset_stats = None
+
+            container = [dataset_stats]
+            dist.broadcast_object_list(container, src=0)
+            dataset_stats = container[0]
+        
+    train_processor.set_normalizer_from_stats(dataset_stats)
+    eval_processor.set_normalizer_from_stats(dataset_stats)
+    if accelerator.is_main_process:
+        save_dataset_stats_to_json(dataset_stats, output_dir / "dataset_stats.json")
+
     # Initialize MFU Tracker
     mfu_tracker = None
     if accelerator.is_main_process:
         effective_batch_size = cfg.model.batch_size * cfg.model.grad_accumulation_steps * dist.get_world_size()
-        if skip_mfu_tracker:
-            logger.info("Skipping MFU tracker for DiffusionUnetImagePolicy (FDP) since MFU estimation is not supported.")
-        else:
+        if use_mfu_tracker:
             mfu_tracker = MFUTracker(
                 model=model.module,
                 batch_size=effective_batch_size,
                 device_id=device_id,
                 update_interval=cfg.logger.log_steps,
                 world_size=dist.get_world_size(),
-                dtype=amp_dtype,  # Pass the training dtype
+                dtype=torch.bfloat16 if cfg.model.enable_bf16_training else torch.float32,
             )
             mfu_tracker.reset(step)
-    
+        else:
+            logger.info(f"Skipping MFU tracker as the policy is not an instance of class {GalaxeaZeroPolicy.__name__}.")
+
     accelerator.wait_for_everyone()
     # Train!
     training_done = False
     with tqdm.tqdm(initial=step, total=max_steps, leave=False, dynamic_ncols=True) as progress:
         while not training_done:
             train_sampler.set_epoch(epoch)
-            data_iter = iter(train_dataloader)
             if resume_dataloader:
-                logger.info(f"Resume dataloader state from batch_idx {batch_idx}")
-                for _ in range(batch_idx):
-                    next(data_iter)
+                logger.info(f"Resume dataloader state from batch_idx {batch_idx} of epoch {epoch}")
+                train_sampler.set_start_batch(batch_idx)
                 resume_dataloader = False
             else:
                 batch_idx = 0
+                train_sampler.set_start_batch(0)
 
+            data_iter = iter(train_dataloader)
             model.train()
             optimizer.zero_grad()
             while batch_idx < len(train_dataloader):
@@ -422,7 +315,7 @@ def finetune(cfg: DictConfig):
                     # Normalize loss to account for gradient accumulation
                     normalized_loss = loss / cfg.model.grad_accumulation_steps
                     normalized_loss.backward()
-                    
+
                 batch_idx += 1
 
                 if is_optimizer_step:
@@ -438,11 +331,11 @@ def finetune(cfg: DictConfig):
 
                     if use_ema:
                         ema_model.update()
-                    
+
                     step += 1
 
                     # Log metrics on optimizer steps
-                    if step % cfg.logger.log_steps == 0 and tracker_type != "none":
+                    if step % cfg.logger.log_steps == 0:
                         # Ensure values are plain Python numbers
                         log_dict = {k: (v.item() if hasattr(v, "item") else float(v)) for k, v in loss_value_dict.items()}
                         log_dict.update({
@@ -450,12 +343,15 @@ def finetune(cfg: DictConfig):
                             "lr/model": optimizer.param_groups[1]["lr"],
                             "grad_norm": grad_norm.item(),
                         })
-                        
+
                         # Add MFU metrics if tracker is available
                         if mfu_tracker is not None:
                             mfu_metrics = mfu_tracker.compute_metrics(step)
                             log_dict.update(mfu_metrics)
-                        
+                        global_monitor = get_global_monitor()
+                        if global_monitor is not None:
+                            log_dict.update(global_monitor.get_metrics())
+
                         accelerator.log(log_dict, step=step)
 
                 # Save checkpoint in the main process
@@ -463,15 +359,18 @@ def finetune(cfg: DictConfig):
                     if accelerator.is_main_process:
                         logger.info(f"Saving model checkpoint for step {step} ...")
                         unwrapped_model = accelerator.unwrap_model(model)
+                        checkpoint_path = output_dir / "checkpoints" / f"step_{step}"
                         save_checkpoint(
-                            path=output_dir / "checkpoints" / f"step_{step}.pt", 
-                            step=step, 
-                            epoch=epoch, 
-                            batch_idx=batch_idx, 
-                            model=unwrapped_model, 
-                            optimizer=optimizer, 
-                            scheduler=scheduler, 
+                            path=checkpoint_path,
+                            step=step,
+                            epoch=epoch,
+                            batch_idx=batch_idx,
+                            model=unwrapped_model,
+                            optimizer=optimizer,
+                            scheduler=scheduler,
                             ema_model=ema_model if use_ema else None,
+                            dataset_stats=dataset_stats,
+                            cfg=cfg,
                         )
 
                     # Block on main process checkpointing
@@ -484,48 +383,25 @@ def finetune(cfg: DictConfig):
                     break
 
             epoch += 1
-        
+
     if accelerator.is_main_process:
         logger.info(f"Saving model checkpoint for step {step} ...")
-        checkpoint_path = output_dir / "checkpoints" / f"step_{step}.pt"
         unwrapped_model = accelerator.unwrap_model(model)
+        checkpoint_path = output_dir / "checkpoints" / f"step_{step}"
         save_checkpoint(
             path=checkpoint_path,
-            step=step, 
-            epoch=epoch, 
-            batch_idx=batch_idx, 
-            model=unwrapped_model, 
-            optimizer=optimizer, 
-            scheduler=scheduler, 
-            ema_model=ema_model if use_ema else None
+            step=step,
+            epoch=epoch,
+            batch_idx=batch_idx,
+            model=unwrapped_model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            ema_model=ema_model if use_ema else None,
+            dataset_stats=dataset_stats,
+            cfg=cfg,
         )
-        
-        last_pt_path = output_dir / "last.pt"
-        if last_pt_path.exists():
-            last_pt_path.unlink()
-        last_pt_path.symlink_to(checkpoint_path.name)
 
-        # Removed dataset tar files after training
-        if is_use_edp:
-            shutil.rmtree(EDP_STORE_DATASET_ROOT)
-            logger.info(f"Removed dataset tar files from {EDP_STORE_DATASET_ROOT}")
-
-    edp = edp_uploader.EDPCardCreator(cfg['edp'])
-    if accelerator.is_main_process and edp.has_card:
-        try:
-            logger.info(f"Uploading EDP card: {edp.has_card}")
-            edp.upload()
-
-            logger.info("Exporting ONNX model...")
-            onnx_exporter = ONNXExporter(cfg=cfg)
-            onnx_exporter.export_onnx()
-            logger.info("ONNX model exported successfully")
-        except Exception as e:
-            logger.error(f"EDPONNX: {e}")
-            import traceback; traceback.print_exc()
-    
     accelerator.wait_for_everyone()
-    accelerator.end_training()
 
 
 if __name__ == "__main__":

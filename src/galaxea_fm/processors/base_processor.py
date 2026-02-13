@@ -14,6 +14,9 @@ class BaseProcessor(ABC):
         # keys
         shape_meta: Dict[str, Any],
         num_obs_steps: int,
+        num_output_cameras: int, 
+        action_output_dim: int,
+        proprio_output_dim: int,
 
         action_state_transforms: Optional[List[Any]], 
 
@@ -27,22 +30,25 @@ class BaseProcessor(ABC):
         # image transform
         train_transforms: Dict[str, List[Any]] | None,
         val_transforms: Dict[str, List[Any]] | None, 
-        num_output_cameras: int, 
 
         # instruction transform
         drop_high_level_prob: float,
         use_zh_instruction: bool,
+
+        tokenizer: Any
     ):
         self.shape_meta = shape_meta
+        self.num_obs_steps = num_obs_steps
+        self.num_output_cameras = num_output_cameras
+        self.action_output_dim = action_output_dim
+        self.proprio_output_dim = proprio_output_dim
 
         self.drop_high_level_prob = drop_high_level_prob
         self.use_zh_instruction = use_zh_instruction
 
         # image
-        self.num_obs_steps = num_obs_steps
         self.train_transforms = train_transforms
         self.val_transforms = val_transforms
-        self.num_output_cameras = num_output_cameras
 
         self._is_train = None
 
@@ -54,6 +60,8 @@ class BaseProcessor(ABC):
         self.norm_default_mode = norm_default_mode
         self.norm_exception_mode = norm_exception_mode
         self._normalizer = None
+
+        self.tokenizer = tokenizer
 
     @property
     def is_train(self):
@@ -69,10 +77,14 @@ class BaseProcessor(ABC):
 
     def train(self):
         self._is_train = True
+        if hasattr(self.tokenizer, 'train'):
+            self.tokenizer.train()
         return self
 
     def eval(self):
         self._is_train = False
+        if hasattr(self.tokenizer, 'eval'):
+            self.tokenizer.eval()
         return self
 
     def set_normalizer_from_stats(self, dataset_stats: Dict[str, Any] = None):
@@ -112,9 +124,6 @@ class BaseProcessor(ABC):
             instruction = f"[High]: {high_level_instruction}, [Low]: {low_level_instruction}"
         
         return instruction
-    
-    def tokenize_instruction(self, instruction: str) -> torch.Tensor:
-        return None
 
     def action_state_transform(self, batch):
         if "action" in batch:
@@ -177,11 +186,8 @@ class BaseProcessor(ABC):
                 - "idx": int, sample index
         """
         sample = {}
-        # 1. instruction & tokenization
-        instructions = self.augment_instruction(data)
-        tokenized = self.tokenize_instruction(instructions)
-        if tokenized is not None:
-            sample["input_ids"], sample["labels"], sample["attention_mask"] = tokenized # [max_image_text_tokens,]
+        # 1. instruction
+        sample["instruction"] = self.augment_instruction(data)
 
         # 2. image
         processed_images = []
@@ -223,13 +229,17 @@ class BaseProcessor(ABC):
             sample["action"] = data["action"] # [action_horizon, action_dim]
             sample["action_is_pad"] = data["action_is_pad"] # [action_horizon,]
             sample["action_dim_is_pad"] = data["action_dim_is_pad"] # [action_dim,]
+            assert sample["action"].shape[-1] == self.action_output_dim
         
         # TODO: rename all "state" into "proprio"
         sample["proprio"] = data["state"] # [num_obs_steps, proprio_dim]
         sample["proprio_is_pad"] = data["state_is_pad"] # [num_obs_steps,]
         sample["proprio_dim_is_pad"] = data["state_dim_is_pad"] # [proprio_dim,]
+        assert sample["proprio"].shape[-1] == self.proprio_output_dim
 
         sample["idx"] = data["idx"]
+
+        sample = self.tokenizer(sample)
         
         return sample
 

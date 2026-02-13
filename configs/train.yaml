@@ -11,9 +11,11 @@ defaults:
 seed: 7
 resume_ckpt: null
 output_dir: ${hydra:runtime.output_dir}
+dataset_stats_cache_dir: ${oc.env:GALAXEA_FM_DATASET_STATS_CACHE_DIR}
+load_legacy_checkpoint: false  # true: single .pt file, false: directory format
 
 # checkpointing
-checkpointing_steps: 5000
+checkpointing_steps: 20000
 
 # logger configuration - supports swanlab, wandb, or none
 logger:
@@ -53,14 +55,17 @@ hydra:
 
 tags: null
 
-edp:
-  card: # if not given, the model will not be uploaed to EDP
-  training_time: ${now:%Y-%m-%d}_${now:%H-%M-%S}
-  git_branch: null
-  git_commit: null
-  root: null
-  repo_ids: null # TODO: collect mixture dataset_dirs
-  save_dir: ${output_dir}
-  tags: ${tags}
-  max_steps: ${model.max_steps}
-  batch_size: ${model.batch_size}
+
+
+libero_eval:
+  task_suite_names: 
+   - libero_10
+   - libero_spatial
+   - libero_object
+   - libero_goal
+  num_steps_wait: 10
+  replan_steps: 5
+  num_trials: 50
+  output_dir: ${output_dir}
+  run_id_note: null
+  env_num: 50

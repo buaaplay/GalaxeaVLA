@@ -1,10 +1,10 @@
-pretrained_ckpt: /mnt/pretrained_models/G0Plus_3B_base/checkpoints/g0plus_2k_hours_20261213.pt
+pretrained_ckpt: /TO/Your/Path/G0Plus_260202
 use_pretrained_norm_stats: True
 
 # strategy
 model_weights_to_bf16: False
 enable_bf16_training: True
-use_torch_compile: False # As xiao suggests
+use_torch_compile: False
 find_unused_parameters: False
 
 # dataloader
@@ -14,19 +14,19 @@ pin_memory: True
 persistent_workers: True
 
 # training period
-max_epochs: 30
+max_epochs: 4
 max_steps: null
 grad_accumulation_steps: 1
 
 # optimizer
 use_8bit_optimizer: False # AdamW8bit or AdamW
-learning_rate: 2.5e-5 # following allen
-weight_decay: 1e-6 # following allen
-betas: [0.9, 0.999] # G0
+learning_rate: 2.5e-5
+weight_decay: 1e-2
+betas: [0.9, 0.95]
 
 # LR scheduler
 lr_scheduler_type: "cosine" # LambdaLR, following openpi
-warmup_steps: 500 # following allen
+warmup_steps: 1000
 
 max_grad_norm: 1.0
 
@@ -39,115 +39,42 @@ ema:
 # sync batch normalization
 use_sync_bn: False
 
-processor:
-  _target_: galaxea_fm.processors.galaxea_zero_processor.GalaxeaZeroProcessor
 
-  shape_meta: ${data.shape_meta}
-  num_obs_steps: ${data.obs_size}
-
-  # action & state transform
-  action_state_transforms: 
-    - _target_: galaxea_fm.transforms.relative_action.RelativeJointTransform
-      keys: [left_arm, right_arm]
-    - _target_: galaxea_fm.transforms.misc.WrapStateAngle
-      keys: [chassis]
-
-  # action & state normalization
-  use_stepwise_action_norm: True
-  norm_default_mode: "z-score"
-  norm_exception_mode:
-    action:
-      left_gripper: "0/100"
-      right_gripper: "0/100"
-  
-  action_state_merger: 
-    _target_: galaxea_fm.transforms.action_state_merger.ConcatLeftAlign
-
-  # image transform
-  train_transforms: 
-    head_rgb:
-      - _target_: torchvision.transforms.Resize
-        size: [224, 224]
-      - _target_: galaxea_fm.transforms.image.ToTensor
-      - _target_: torchvision.transforms.Normalize
-        mean: [0.5, 0.5, 0.5]
-        std: [0.5, 0.5, 0.5]
-    left_wrist_rgb:
-      - _target_: torchvision.transforms.Resize
-        size: [224, 224]
-      - _target_: galaxea_fm.transforms.image.ToTensor
-      - _target_: torchvision.transforms.Normalize
-        mean: [0.5, 0.5, 0.5]
-        std: [0.5, 0.5, 0.5]
-    right_wrist_rgb:
-      - _target_: torchvision.transforms.Resize
-        size: [224, 224]
-      - _target_: galaxea_fm.transforms.image.ToTensor
-      - _target_: torchvision.transforms.Normalize
-        mean: [0.5, 0.5, 0.5]
-        std: [0.5, 0.5, 0.5]
-  val_transforms: 
-    head_rgb:
-      - _target_: torchvision.transforms.Resize
-        size: [224, 224]
-      - _target_: galaxea_fm.transforms.image.ToTensor
-      - _target_: torchvision.transforms.Normalize
-        mean: [0.5, 0.5, 0.5]
-        std: [0.5, 0.5, 0.5]
-    left_wrist_rgb:
-      - _target_: torchvision.transforms.Resize
-        size: [224, 224]
-      - _target_: galaxea_fm.transforms.image.ToTensor
-      - _target_: torchvision.transforms.Normalize
-        mean: [0.5, 0.5, 0.5]
-        std: [0.5, 0.5, 0.5]
-    right_wrist_rgb:
-      - _target_: torchvision.transforms.Resize
-        size: [224, 224]
-      - _target_: galaxea_fm.transforms.image.ToTensor
-      - _target_: torchvision.transforms.Normalize
-        mean: [0.5, 0.5, 0.5]
-        std: [0.5, 0.5, 0.5]
-
-  num_output_cameras: 3
-    
-  # instruction
-  use_zh_instruction: False
-  drop_high_level_prob: 1.0
-
-  # tokenization
+tokenizer:
+  _target_: galaxea_fm.models.galaxea_zero.paligemma.tokenizer.PaliGemmaTokenizer
+  tokenizer_params:
+    pretrained_model_name_or_path: google/paligemma-3b-pt-224
+    local_files_only: False
+    token: null
   pad_token_id: ${model.model_arch.pad_token_id}
   image_token_index: ${model.model_arch.image_token_index}
-  tokenizer_params: 
-    pretrained_model_name_or_path: /data/google/paligemma-3b-pt-224
-    local_files_only: False
-    token: null                 # fill in the token if you access gated repo, default to None
   max_text_tokens: ${model.model_arch.max_text_tokens}
-  max_image_text_tokens: ${model.model_arch.max_image_text_tokens}
-  num_input_cameras: ${model.model_arch.num_input_images}
-  num_image_tokens_per_camera: ${model.model_arch.vision.num_image_tokens}
+  num_tokens_per_image: ${model.model_arch.vision.num_image_tokens}
+  num_input_images: ${model.model_arch.num_input_images}
+
 
 model_arch:
   _target_: galaxea_fm.models.galaxea_zero.galaxea_zero_policy.GalaxeaZeroPolicy
   model_name: galaxea_fm.models.galaxea_zero.galaxea_zero_policy.GalaxeaZero
-  pretrained_model_path: /data/google/paligemma-3b-pt-224
+  pretrained_model_path: /To/Your/Path/google/paligemma-3b-pt-224
 
   vla_training_strategy: "vla-full-train" # training both vision and language
   backbone_lr_multiplier: 1.0
   image_token_index: 257152
   pad_token_id: 0
   vocab_size: 257216
+  fill_padded_with_token: False
+  embed_token_key_prefix: language_model.model.embed_tokens
 
-  cond_steps: ${data.obs_size}
-  horizon_steps: ${data.action_size}
+  cond_steps: ${data.dataset.obs_size}
+  horizon_steps: ${data.dataset.action_size}
   max_text_tokens: 55
+  num_input_images: ${eval:'${model.model_arch.cond_steps} * ${data.processor.num_output_cameras}'} # $data.window_size * LEN($data.camera_views)
   max_image_text_tokens: ${eval:'${model.model_arch.num_input_images} * ${model.model_arch.vision.num_image_tokens} + ${model.model_arch.max_text_tokens}'}
-  num_input_images: ${eval:'${model.model_arch.cond_steps} * ${model.model_arch.vision.num_channels}'} # $data.window_size * LEN($data.camera_views)
-  num_extra_image_tokens_per_camera: 0
   final_action_clip_value: null  # data normalized in [-1,1]
 
-  action_dim: 26 # 2 x [QPOS (6) + gripper (1)] + Torso Velocity (6) + Chassis Velocity (6)
-  proprio_dim: 21  # 2 * [QPOS (6) + gripper (1)] + 4 (torso) + 3 (base vel) + last action(26)
+  action_dim: ${data.processor.action_output_dim}
+  proprio_dim: ${data.processor.proprio_output_dim}
   action_decoder_layers: 2
   action_expert_adaptive_mode: null
 
@@ -156,6 +83,7 @@ model_arch:
 
   vision:
     name: galaxea_fm.models.galaxea_zero.paligemma.siglip.SiglipVisionModel
+    key_prefix: vision_tower
     hidden_size: 1152 # siglip
     intermediate_size: 4304
     num_hidden_layers: 27
@@ -169,13 +97,20 @@ model_arch:
   
   vision_projector:
     name: galaxea_fm.models.galaxea_zero.paligemma.siglip.PaliGemmaMultiModalProjector
+    key_prefix: multi_modal_projector
     vision_config:
       hidden_size: 1152
       projection_dim: 2048
     
   joint:
     name: galaxea_fm.models.galaxea_zero.joint_model.JointModel
+    key_prefix: language_model.model
     action_expert_adaptive_mode: null
+    module_names:
+      mlp: galaxea_fm.models.galaxea_zero.paligemma.modules.GemmaMLP
+      norm: galaxea_fm.models.galaxea_zero.paligemma.modules.GemmaRMSNorm
+      rope: galaxea_fm.models.galaxea_zero.paligemma.modules.GemmaRotaryEmbedding
+    
     mixture:
       vlm:   # gemma
         hidden_size: 2048
@@ -205,3 +140,9 @@ model_arch:
     rope_theta: 10000.0
     attention_bias: False
     attention_dropout: 0.0
+
+model_meta:
+  norm_default_mode: z-score
+  input_image_size: 
+    - ${model.model_arch.vision.image_size}
+    - ${model.model_arch.vision.image_size}

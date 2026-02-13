@@ -1,4 +1,4 @@
-ARG CUDA_VERSION=12.4.1
+ARG CUDA_VERSION=12.8.1
 ARG OS_VERSION=22.04
 
 FROM nvcr.io/nvidia/cuda:${CUDA_VERSION}-cudnn-devel-ubuntu${OS_VERSION}
@@ -35,7 +35,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake \
     curl \
     build-essential \
-    ffmpeg
+    ffmpeg \
+    libegl1 \
+    libgl1 \
+    libglvnd0 \
+    libgles2 \
+    libglx0 \
+    libglfw3 \
+    libosmesa6 \
+    libglew2.2 \
+    libosmesa6-dev
 
 # Install python3
 RUN apt-get install -y --no-install-recommends \
@@ -64,18 +73,6 @@ RUN mkdir -p /workspace
 WORKDIR /workspace
 
 RUN cd /workspace && \
-    git clone https://cnb:<CNB>@cnb.cool/galaxea.ai/FoundationModel/GalaxeaLeRobot
-
-RUN cd /workspace && \
-    git clone https://cnb:<CNB>@cnb.cool/galaxea.ai/FoundationModel/GalaxeaManipSim
-
-RUN cd /workspace && \
-    git clone https://cnb:<CNB>@cnb.cool/galaxea.ai/FoundationModel/Galaxea0 -b dev/galaxea_fm && \
-    cd Galaxea0 && \
+    git clone https://github.com/OpenGalaxea/GalaxeaVLA.git GalaxeaFM && \
+    cd GalaxeaFM && \
     uv sync --index-strategy unsafe-best-match
-
-RUN cd /workspace/Galaxea0 && \
-    uv pip install -e . && \
-    uv pip install -e .[dev] && \
-    uv pip install --no-deps -e ../GalaxeaLeRobot && \
-    uv pip install --no-deps -e ../GalaxeaManipSim

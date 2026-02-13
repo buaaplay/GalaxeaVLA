@@ -25,6 +25,12 @@ def _oc_load(path: str, key: Optional[str] = None) -> Any:
         return cfg
     return OmegaConf.select(cfg, key)
 
+def sum_shapes(shape_meta_list):
+    if not shape_meta_list:
+        return 0
+    total = sum(int(item['shape']) for item in shape_meta_list)
+    return total
+
 def register_default_resolvers() -> None:
     """
     Register all resolvers commonly used across entrypoints.
@@ -36,3 +42,4 @@ def register_default_resolvers() -> None:
     _register("max", lambda x: max(x))
     _register("round_up", math.ceil)
     _register("round_down", math.floor)
+    _register("sum_shapes", sum_shapes)

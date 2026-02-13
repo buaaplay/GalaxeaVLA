@@ -53,6 +53,7 @@ class GalaxeaZero(nn.Module):
         self.vocab_size = cfg.vocab_size
         self.pad_token_id = cfg.pad_token_id
         self.image_token_index = cfg.image_token_index
+        self.fill_padded_with_token = cfg.fill_padded_with_token
 
         self.max_image_text_tokens = cfg.max_image_text_tokens
         self.cond_steps = cfg.cond_steps
@@ -86,13 +87,17 @@ class GalaxeaZero(nn.Module):
             self.image_text_hidden_size,
             self.pad_token_id,
         )  # 0.527B parameters
+        self.embed_tokens_key_prefix = cfg.embed_token_key_prefix
 
         # Vision
         self.vision_tower = get_obj_from_str(cfg.vision.name)(cfg.vision)
         self.multi_modal_projector = get_obj_from_str(cfg.vision_projector.name)(cfg.vision_projector)
+        self.vision_tower_key_prefix = cfg.vision.key_prefix
+        self.multi_modal_projector_key_prefix = cfg.vision_projector.key_prefix
 
         # Mixtures
         self.joint_model = get_obj_from_str(cfg.joint.name)(cfg.joint)
+        self.joint_model_key_prefix = cfg.joint.key_prefix
 
         # Action, proprio, time encoders
         self.action_expert_adaptive_mode = cfg.action_expert_adaptive_mode
@@ -188,8 +193,8 @@ class GalaxeaZero(nn.Module):
         # load embed tokens
         embed_tokens_state_dict = self.embed_tokens.state_dict()
         for k, v in tensors.items():
-            if "embed_tokens" in k:
-                new_key = k.replace("language_model.model.embed_tokens.", "")
+            if self.embed_tokens_key_prefix in k:
+                new_key = k.replace(f"{self.embed_tokens_key_prefix}.", "")
                 embed_tokens_state_dict[new_key] = v
         self.embed_tokens.load_state_dict(embed_tokens_state_dict, strict=True)
         logger.info("Loaded pre-trained weights for embed tokens")
@@ -197,8 +202,8 @@ class GalaxeaZero(nn.Module):
         # load vision tower --- "vision_tower.vision_model" -> "vision_model"
         vision_tower_state_dict = self.vision_tower.state_dict()
         for k, v in tensors.items():
-            if "vision_tower" in k:
-                new_key = k.replace("vision_tower.", "")
+            if self.vision_tower_key_prefix in k:
+                new_key = k.replace(f"{self.vision_tower_key_prefix}.", "")
                 vision_tower_state_dict[new_key] = v
         self.vision_tower.load_state_dict(vision_tower_state_dict, strict=True)
         logger.info("Loaded pre-trained weights for vision tower")
@@ -206,8 +211,8 @@ class GalaxeaZero(nn.Module):
         # load projector --- "multi_modal_projector.linear" -> "linear"
         multi_modal_projector_state_dict = self.multi_modal_projector.state_dict()
         for k, v in tensors.items():
-            if "multi_modal_projector" in k:
-                new_key = k.replace("multi_modal_projector.", "")
+            if self.multi_modal_projector_key_prefix in k:
+                new_key = k.replace(f"{self.multi_modal_projector_key_prefix}.", "")
                 multi_modal_projector_state_dict[new_key] = v
         self.multi_modal_projector.load_state_dict(
             multi_modal_projector_state_dict, strict=True
@@ -225,10 +230,14 @@ class GalaxeaZero(nn.Module):
         for key in lora_keys:
             del joint_model_state_dict[key]
         for k, v in tensors.items():
-            if "language_model.model" in k:
-                new_key = k.replace("language_model.model.", "mixtures.vlm.")
+            if self.joint_model_key_prefix in k:
+                new_key = k.replace(f"{self.joint_model_key_prefix}.", "mixtures.vlm.")
                 joint_model_state_dict[new_key] = v
-        self.joint_model.load_state_dict(joint_model_state_dict, strict=False)
+        load_result = self.joint_model.load_state_dict(joint_model_state_dict, strict=False)
+        if load_result.missing_keys:
+            logger.warning(f"Missing keys when loading pre-trained weights: {load_result.missing_keys}")
+        if load_result.unexpected_keys:
+            logger.warning(f"Unexpected keys when loading pre-trained weights: {load_result.unexpected_keys}")
         logger.info("Loaded pre-trained weights for lm part of the joint model")
 
     def _check_gemma_unused_parameter_by_name(self, name: str) -> bool:
@@ -399,10 +408,12 @@ class GalaxeaZero(nn.Module):
         )
 
         # [Batch_Size, Seq_Len]
-        text_mask = (input_ids != self.image_token_index) & (
-            input_ids != self.pad_token_id
-        )
-        image_mask = input_ids == self.image_token_index
+        image_mask = input_ids == self.image_token_index # [Batch_Size, Seq_Len]
+        if self.fill_padded_with_token: # In the final embedding, the padded ones are filled with the token of pad_token_id
+            text_mask = ~image_mask
+        else: # Or with pad_token_id itself
+            text_mask = ~image_mask & (input_ids != self.pad_token_id)
+        
         # Ensure dtype consistency when assigning
         final_embedding[text_mask] = inputs_embeds[text_mask].to(final_embedding.dtype)
         for i in range(bsz):
