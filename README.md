@@ -108,7 +108,7 @@ Note that before you run the installation:
 | ---------------------- | ----------- | --------------------------------- | ------------------------------------------------------------ |
 | G0_3B_base              | Fine-Tuning | Base G0-VLA Model for fine-tuning | https://huggingface.co/OpenGalaxea/G0-VLA/blob/main/G0_3B_base.pt |
 | G0Plus_3B_base              | Fine-Tuning | Base G0Plus-VLA Model for fine-tuning | https://huggingface.co/OpenGalaxea/G0-VLA/tree/main/G0Plus_3B_base |
-| G0Tiny_250M_base            | Fine-Tuning | Lightweight G0Tiny-VLA Model (250M) for edge deployment on R1 Pro Orin | Coming soon |
+| G0Tiny_250M_base            | Fine-Tuning | Lightweight G0Tiny-VLA Model (250M) for edge deployment on R1 Pro Orin | https://huggingface.co/OpenGalaxea/G0-VLA/tree/main/G0Tiny_260120 |
 | G0Plus_3B_base-pick_and_place | Deployment | Pick-and-Place Demo in the Wild | https://huggingface.co/OpenGalaxea/G0-VLA/tree/main/G0Plus_PP_CKPT |
 
 
