@@ -1,0 +1,11 @@
+model_config_path: configs/model/vla/g0plus.yaml
+data_config_path: configs/data/r1lite/arm_torso_velocity_chassis.yaml
+
+# Replace these paths on your Linux inference host.
+checkpoint_path: checkpoints/G0Plus_3B_base/model_state_dict.pt
+dataset_stats_path: checkpoints/G0Plus_3B_base/dataset_stats.json
+paligemma_path: data/google/paligemma-3b-pt-224
+
+device: cuda
+strict_checkpoint_loading: false
+seed: 42
