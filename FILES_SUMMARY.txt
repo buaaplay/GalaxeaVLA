@@ -1,0 +1,54 @@
+===========================================
+GalaxeaVLA 服务器部署文件清单
+===========================================
+
+📚 文档文件（3个）
+-------------------------------------------
+1. QUICKSTART.md           - 5分钟快速上手指南 ⭐ 推荐先读
+2. SERVER_SETUP.md         - 详细部署文档和故障排查
+3. DEPLOYMENT_README.md    - 文件结构说明和使用指南
+
+🔧 脚本文件（4个）
+-------------------------------------------
+4. scripts/setup_server.sh       - 一键部署脚本（创建目录、链接权重）
+5. scripts/download_paligemma.sh - PaliGemma 权重下载脚本
+6. scripts/server_inference.py   - 快速推理测试脚本
+7. sync_to_server.sh            - 文件同步脚本（Mac -> 服务器）
+
+📁 目录结构（自动创建）
+-------------------------------------------
+checkpoints/                - 模型权重目录（脚本会创建软链接）
+data/google/                - PaliGemma 权重目录（需下载）
+data/datasets/              - LeRobot 数据集目录
+outputs/                    - 推理输出目录
+.env                        - 环境变量文件（脚本会生成）
+
+===========================================
+文件大小统计
+===========================================
+QUICKSTART.md:           7.4 KB
+SERVER_SETUP.md:         7.7 KB  
+DEPLOYMENT_README.md:    7.4 KB
+setup_server.sh:         6.1 KB
+download_paligemma.sh:   4.4 KB
+server_inference.py:     9.4 KB
+sync_to_server.sh:       ~2 KB
+
+总计: ~45 KB (所有配置文件)
+
+===========================================
+服务器上需要的空间
+===========================================
+✅ 已有权重（软链接，不占新空间）:
+   - G0Plus_3B_base:      13 GB
+   - G0Plus_PP_CKPT:      13 GB
+
+⬇️  需要下载:
+   - PaliGemma-3b-pt-224: ~5 GB
+
+📊 数据集（可选）:
+   - LeRobot 格式数据:    根据需要
+
+💾 总计: 至少 5 GB 可用空间
+
+===========================================
