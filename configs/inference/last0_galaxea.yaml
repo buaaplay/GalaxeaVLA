@@ -1,0 +1,10 @@
+last0_root: ../last0
+model_root: ""
+stats_path: null
+device: cuda
+cuda_id: 0
+action_chunk: 16
+latent_size: 8
+use_latent: true
+use_proprio: false
+seed: 42
