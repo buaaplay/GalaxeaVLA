@@ -1,7 +1,7 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/usr/bin/env sh
+set -eu
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 RUN_STAMP="$(date '+%m%d_%H%M%S')"
@@ -13,19 +13,21 @@ TIMEOUT_SEC="${TIMEOUT_SEC:-15}"
 
 mkdir -p "${RUN_DIR}"
 
-if [[ -f /opt/ros/humble/setup.bash ]]; then
+if [ -f /opt/ros/humble/setup.bash ]; then
   # shellcheck disable=SC1091
-  source /opt/ros/humble/setup.bash
+  . /opt/ros/humble/setup.bash
 fi
 
-if [[ -f "${PROJECT_ROOT}/.venv/bin/activate" ]]; then
+if [ -f "${PROJECT_ROOT}/.venv/bin/activate" ]; then
   # shellcheck disable=SC1091
-  source "${PROJECT_ROOT}/.venv/bin/activate"
+  . "${PROJECT_ROOT}/.venv/bin/activate"
 fi
 
 cd "${PROJECT_ROOT}"
 
-PYTHONPATH=src python scripts/test_ros2_observation.py \
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+
+PYTHONPATH=src "${PYTHON_BIN}" scripts/test_ros2_observation.py \
   --output-dir "${RUN_DIR}" \
   --instruction "${INSTRUCTION}" \
   --hardware "${HARDWARE}" \

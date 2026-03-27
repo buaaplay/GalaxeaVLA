@@ -45,6 +45,16 @@ echo "LaST0 root: ${LAST0_ROOT}" | tee -a "${CONSOLE_LOG}"
 echo "Model root: ${MODEL_ROOT}" | tee -a "${CONSOLE_LOG}"
 echo "Config path: ${CONFIG_PATH}" | tee -a "${CONSOLE_LOG}"
 
+if [[ -f /opt/ros/humble/setup.bash ]]; then
+  # shellcheck disable=SC1091
+  source /opt/ros/humble/setup.bash
+fi
+
+if [[ -f "${PROJECT_ROOT}/.venv/bin/activate" ]]; then
+  # shellcheck disable=SC1091
+  source "${PROJECT_ROOT}/.venv/bin/activate"
+fi
+
 CLIP_FLAG=()
 if [[ "${CLIP_ACTION}" == "1" ]]; then
   CLIP_FLAG+=(--clip_action)
@@ -52,14 +62,16 @@ fi
 
 cd "${PROJECT_ROOT}"
 
-PYTHONPATH=src python scripts/last0_server_inference.py \
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+
+PYTHONPATH=src "${PYTHON_BIN}" scripts/last0_server_inference.py \
   --config "${CONFIG_PATH}" \
   --observation_json "${OBS_JSON}" \
   --save_result_json "${RESULT_JSON}" \
   "${CLIP_FLAG[@]}" 2>&1 | tee -a "${CONSOLE_LOG}"
 
 if [[ "${RUN_BRIDGE}" == "1" ]]; then
-  PYTHONPATH=src python scripts/last0_robot_bridge.py \
+  PYTHONPATH=src "${PYTHON_BIN}" scripts/last0_robot_bridge.py \
     --observation_json "${OBS_JSON}" \
     --action_json "${RESULT_JSON}" \
     --save_result_json "${POSE_JSON}" 2>&1 | tee -a "${CONSOLE_LOG}"
