@@ -1,7 +1,7 @@
-#!/usr/bin/env sh
-set -eu
+#!/usr/bin/env bash
+set -eo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 RUN_STAMP="$(date '+%m%d_%H%M%S')"
@@ -13,14 +13,18 @@ TIMEOUT_SEC="${TIMEOUT_SEC:-15}"
 
 mkdir -p "${RUN_DIR}"
 
-if [ -f /opt/ros/humble/setup.bash ]; then
+if [[ -f /opt/ros/humble/setup.bash ]]; then
   # shellcheck disable=SC1091
+  set +u
   . /opt/ros/humble/setup.bash
+  set -u
 fi
 
-if [ -f "${PROJECT_ROOT}/.venv/bin/activate" ]; then
+if [[ -f "${PROJECT_ROOT}/.venv/bin/activate" ]]; then
   # shellcheck disable=SC1091
+  set +u
   . "${PROJECT_ROOT}/.venv/bin/activate"
+  set -u
 fi
 
 cd "${PROJECT_ROOT}"

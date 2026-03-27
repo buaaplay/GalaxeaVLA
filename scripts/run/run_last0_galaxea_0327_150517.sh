@@ -47,12 +47,16 @@ echo "Config path: ${CONFIG_PATH}" | tee -a "${CONSOLE_LOG}"
 
 if [[ -f /opt/ros/humble/setup.bash ]]; then
   # shellcheck disable=SC1091
+  set +u
   source /opt/ros/humble/setup.bash
+  set -u
 fi
 
 if [[ -f "${PROJECT_ROOT}/.venv/bin/activate" ]]; then
   # shellcheck disable=SC1091
+  set +u
   source "${PROJECT_ROOT}/.venv/bin/activate"
+  set -u
 fi
 
 CLIP_FLAG=()
