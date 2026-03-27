@@ -1,5 +1,5 @@
-last0_root: ../last0
-model_root: ""
+last0_root: /home/robot/zhy/last0
+model_root: /home/robot/weights/MyData_finetune_last0_checkpoint-13-171570/tfmr
 stats_path: null
 device: cuda
 cuda_id: 0
